@@ -1,0 +1,2 @@
+[alias]
+r = "rustc --release -- -Ctarget-feature=+sse"
