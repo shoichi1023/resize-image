@@ -1,10 +1,44 @@
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use image::{self, imageops::FilterType::Lanczos3, DynamicImage, RgbImage};
 use mozjpeg::{ColorSpace, Compress, Decompress, Marker, ScanMode, ALL_MARKERS};
 use std::fs;
 
-fn main() -> Result<()> {
-    let raw_data = fs::read("/home/tbenki/Downloads/0.jpg")?;
+use std::env;
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
+
+use rayon::prelude::*;
+
+const TARGET_SIZE: u32 = 1280;
+
+fn main() {
+    let target_dir = match env::args().nth(1) {
+        Some(v) => PathBuf::from(v).parent().unwrap().join("compressed"),
+        None => return,
+    };
+    if !target_dir.exists() {
+        fs::create_dir(&target_dir).unwrap();
+    }
+
+    let source_files = env::args()
+        .skip(1)
+        .map(PathBuf::from)
+        .filter(|p| p.is_file() && p.file_name().is_some() && p.extension().is_some())
+        .collect::<Vec<PathBuf>>();
+
+    source_files
+        .par_iter()
+        .for_each(|path| match process(&path, &target_dir) {
+            Ok(file_name) => println!("{} is compressed.", file_name),
+            Err(err) => println!("FAILED due to {}", err),
+        });
+    pause();
+}
+
+fn process(path: &Path, target_dir: &Path) -> anyhow::Result<String> {
+    let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+
+    let raw_data = fs::read(path)?;
     let decomp = Decompress::with_markers(ALL_MARKERS).from_mem(&raw_data)?;
 
     // markers の中に Exif 情報がある
@@ -43,7 +77,13 @@ fn main() -> Result<()> {
     // 2) unshrpen の一つ目の引数はどの程度ぼかしを入れるか（0.5~5.0 ぐらい？）
     // 　　二つ目の引数はしきい値（1~10 ぐらい？）
     // 　　どのぐらいの数値が良いかは画像によって変わる
-    let img = img.resize(1024, 1024, Lanczos3).unsharpen(0.5, 10);
+    let img = img
+        .resize(
+            TARGET_SIZE,
+            TARGET_SIZE * img.height() / img.width(),
+            Lanczos3,
+        )
+        .unsharpen(0.5, 10);
 
     // リサイズ後の幅・高さ取得
     let width = img.width() as usize;
@@ -81,6 +121,20 @@ fn main() -> Result<()> {
 
     // ファイルに保存
     let buf = comp.data_to_vec().map_err(|e| anyhow!("{:?}", e))?;
-    fs::write("/home/benki/Downloads/1.jpg", &buf)?;
-    Ok(())
+    fs::write(
+        format!("{}/{}_resized.jpg", target_dir.to_string_lossy(), file_name),
+        &buf,
+    )?;
+
+    Ok(file_name)
+}
+
+fn pause() {
+    let mut stdin = io::stdin();
+    let mut stdout = io::stdout();
+
+    write!(stdout, "Press any key to continue...").unwrap();
+    stdout.flush().unwrap();
+
+    let _ = stdin.read(&mut [0u8]).unwrap();
 }

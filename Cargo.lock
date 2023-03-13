@@ -498,6 +498,7 @@ dependencies = [
  "anyhow",
  "image",
  "mozjpeg",
+ "rayon",
 ]
 
 [[package]]
